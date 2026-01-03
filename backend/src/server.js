@@ -11,78 +11,58 @@ import { serve } from "inngest/express";
 import { inngest, functions } from "./lib/inngest.js";
 
 const app = express();
-
-// --- 1. Path Setup for Production ---
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// This logic looks for the 'dist' folder relative to your server.js location
-// It covers standard project structures on Railway
+// In Railway, backend is in /backend and frontend is in /frontend. 
+// This path moves from backend/src to root, then to frontend/dist.
 const distPath = path.resolve(__dirname, "../../frontend/dist");
 
-// Debugging: This will show up in your Railway logs to help us find the files
-console.log("Checking for Frontend at:", distPath);
-if (fs.existsSync(distPath)) {
-  console.log("✅ Frontend dist folder found!");
-} else {
-  console.warn("⚠️ Frontend dist folder NOT found at path. Check your build command.");
-}
+app.use(express.json());
+app.use(cors({ origin: ENV.CLIENT_URL, credentials: true }));
 
-// --- 2. Standard Middleware ---
-app.use(express.json()); // Required for Inngest and APIs
-app.use(cors({
-  origin: ENV.CLIENT_URL,
-  credentials: true
-}));
-
-// --- 3. Inngest Route (MUST come before the frontend catch-all) ---
+// --- 1. Inngest Route (MUST BE BEFORE CATCH-ALL) ---
 app.use(
   "/api/inngest",
   serve({ 
     client: inngest, 
-    // Ensure 'functions' is an array even if you exported an object
     functions: Array.isArray(functions) ? functions : Object.values(functions) 
   })
 );
 
-// --- 4. Health Check ---
+// --- 2. Health Check (To verify the train has arrived!) ---
 app.get("/api/health", (req, res) => {
-  res.status(200).json({ status: "ok", env: ENV.NODE_ENV });
+  res.status(200).json({ status: "ok", message: "Server is alive" });
 });
 
-// --- 5. Production Frontend Handling ---
-if (ENV.NODE_ENV === "production") {
-  // Serve the static files (JS, CSS, Images)
+// --- 3. Frontend Production Logic ---
+if (process.env.NODE_ENV === "production") {
   app.use(express.static(distPath));
 
-  // The Catch-all: This allows React/Vite routing to work
-  // It MUST be the very last route in the file
-  app.get(/(.*)/, (req, res) => {
-    // Check if index.html exists before trying to send it
+  app.get("*", (req, res) => {
     const indexPath = path.join(distPath, "index.html");
     if (fs.existsSync(indexPath)) {
       res.sendFile(indexPath);
     } else {
-      res.status(404).send("Frontend build not found. If this is Railway, check your 'Build Command'.");
+      // This helps you see why the UI is missing in the browser
+      res.status(404).send(`Frontend dist folder not found at: ${distPath}`);
     }
   });
 }
 
-// --- 6. Server Startup ---
+// --- 4. Startup Logic (Non-Crashing) ---
 const startServer = async () => {
-  try {
-    await connectDB();
-    const port = ENV.PORT || 3000;
-    
-    // Listening on "0.0.0.0" is essential for Railway
-    app.listen(port, "0.0.0.0", () => {
-      console.log(`🚀 Server running on port ${port}`);
-      console.log(`📡 Inngest Endpoint: /api/inngest`);
-    });
-  } catch (error) {
-    console.error("❌ Fatal Error:", error);
-    process.exit(1);
-  }
+  // We call connectDB but don't 'await' it to prevent the server from 
+  // failing to start if MongoDB is being slow or has an IP block.
+  connectDB().catch(err => console.error("Delayed MongoDB Connection Error:", err));
+
+  // Railway provides the PORT variable automatically
+  const port = process.env.PORT || 3000;
+  
+  app.listen(port, "0.0.0.0", () => {
+    console.log(`🚀 Server listening on port ${port}`);
+    console.log(`📡 Inngest Endpoint ready at /api/inngest`);
+  });
 };
 
 startServer();
