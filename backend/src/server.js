@@ -8,6 +8,8 @@ import cors from "cors";
 import {serve} from "inngest/express";
 import { inngest, functions } from "./lib/inngest.js";
 
+console.log("Current Environment Variables:", Object.keys(process.env));
+
 const app = express();
 
 // Modern __dirname setup
